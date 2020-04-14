@@ -26,9 +26,28 @@ from scipy.sparse import coo_matrix, csr_matrix
 # %%
 #feed in standardized data
 #need to do a DF.to_csv from the other files
-df = pd.read_csv("")
+df_form = pd.read_csv("formationout.csv")
+df_well = pd.read_csv("out.csv")
+#Merge the 2 CSVs by API number
+df_well.join(df_form, lsuffix = " ")
+#Not sure how to proceed with this, using formation csv only for first attempt
+df_form.head()
 
 
+
+# %%
+#not sure if this is correct, following example notebook
+D_df = df_form.pivot_table("Form Alias","Top MD","API Number").fillna(0)
+D_df
+
+# %%
+R = D_df.values
+well_depth_mean = np.mean(R, axis = 1)
+R_demeaned = R - well_depth_mean.reshape(-1, 1)
+
+# %%
+from sklearn.preprocessing import binarize
+A = binarize(R)
 
 
 # %% [markdown]
@@ -96,5 +115,33 @@ def runALS(A, R, n_factors, n_iterations, lambda_):
     # plt.title('Python Implementation MSE by Iteration \n with %d formations and %d wells' % A.shape);
     # plt.savefig('Python MSE Graph.pdf', format='pdf')
     # plt.show()
+
+
+# %%
+U, Vt = runALS(R, A, 10, 5, 0.1)
+
+# %%
+recommendations = np.dot(U, Vt)
+recsys_df = pd.DataFrame(data = recommendations[0:, 0:], index = D_df.index,
+                        columns = D_df.columns)
+
+# %%
+for i in range(5):
+    plt.scatter(recsys_df.iloc[0:, i].values, D_df.iloc[0:, i].values) #plot predicted vs actual
+    plt.xlabel('predicted depth')
+    plt.ylabel('actual depth')
+    plt.plot(np.arange(0,recsys_df.iloc[0:,i].max()))
+
+# %% [markdown]
+# Predicted depths
+
+# %%
+recsys_df.iloc[0:, 1]
+
+# %% [markdown]
+# Actual depths
+
+# %%
+D_df.iloc[0:, 1]
 
 # %%
