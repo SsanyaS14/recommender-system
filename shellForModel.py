@@ -29,21 +29,27 @@ from scipy.sparse import coo_matrix, csr_matrix
 df_form = pd.read_csv("formationout.csv")
 df_well = pd.read_csv("out.csv")
 #Merge the 2 CSVs by API number
-df_well.join(df_form, lsuffix = " ")
-#Not sure how to proceed with this, using formation csv only for first attempt
-df_form.head()
+df_merged = df_well.merge(df_form, how = "left", on = "API Number")
+print(df_merged.head())
 
 
 
 # %%
-#not sure if this is correct, following example notebook
-D_df = df_form.pivot_table("Form Alias","Top MD","API Number").fillna(0)
+#make a sparse matrix from the dataframe
+D_df = df_merged.pivot_table("Top MD","Form Alias","API Number").fillna(0)
 D_df
+
+# %% [markdown]
+# Trying different ways of normalizing R, demeaning and normalizing with SKLearn
 
 # %%
 R = D_df.values
 well_depth_mean = np.mean(R, axis = 1)
+R_normalize = normalize(R, norm = "max")
 R_demeaned = R - well_depth_mean.reshape(-1, 1)
+
+# %% [markdown]
+# Create binarized matrix with values of 1 where there are non-zero values in the sparse matrix R and values of 0 where there are zero values in the sparse matrix R.
 
 # %%
 from sklearn.preprocessing import binarize
@@ -118,12 +124,13 @@ def runALS(A, R, n_factors, n_iterations, lambda_):
 
 
 # %%
-U, Vt = runALS(R, A, 10, 5, 0.1)
+U, Vt = runALS(R_normalize, A, 10, 10, 0.1)
 
 # %%
 recommendations = np.dot(U, Vt)
 recsys_df = pd.DataFrame(data = recommendations[0:, 0:], index = D_df.index,
                         columns = D_df.columns)
+recsys_df.head()
 
 # %%
 for i in range(5):
@@ -143,5 +150,7 @@ recsys_df.iloc[0:, 1]
 
 # %%
 D_df.iloc[0:, 1]
+
+# %%
 
 # %%
