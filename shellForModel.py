@@ -23,9 +23,10 @@ from sklearn.preprocessing import normalize
 from scipy.sparse import coo_matrix, csr_matrix
 
 
+# %% [markdown]
+# Read in standardized csv files and merge them into one Dataframe
+
 # %%
-#feed in standardized data
-#need to do a DF.to_csv from the other files
 df_form = pd.read_csv("formationout.csv")
 df_well = pd.read_csv("out.csv")
 #Merge the 2 CSVs by API number
@@ -34,10 +35,12 @@ print(df_merged.head())
 
 
 
+# %% [markdown]
+# Make a sparse matrix from the Dataframe
+
 # %%
-#make a sparse matrix from the dataframe
 D_df = df_merged.pivot_table("Top MD","Form Alias","API Number").fillna(0)
-D_df
+df_merged[["Top MD", "Form Alias", "API Number"]]
 
 # %% [markdown]
 # Trying different ways of normalizing R, demeaning and normalizing with SKLearn
@@ -45,11 +48,11 @@ D_df
 # %%
 R = D_df.values
 well_depth_mean = np.mean(R, axis = 1)
-R_normalize = normalize(R, norm = "max")
+R_normalize = normalize(R, norm = "l2")
 R_demeaned = R - well_depth_mean.reshape(-1, 1)
 
 # %% [markdown]
-# Create binarized matrix with values of 1 where there are non-zero values in the sparse matrix R and values of 0 where there are zero values in the sparse matrix R.
+# Create binarized matrix with values of 1 where there are depth values in the sparse matrix R and values of 0 where there are not depth values in the sparse matrix R.
 
 # %%
 from sklearn.preprocessing import binarize
@@ -57,7 +60,7 @@ A = binarize(R)
 
 
 # %% [markdown]
-# This is the important part of the notebook, everything else as far as I can tell is just reshaping and manipulating data.
+# This is the code that runs Alternating Least Squares factorization
 
 # %%
 #ALS factorization from 
@@ -74,47 +77,50 @@ def runALS(A, R, n_factors, n_iterations, lambda_):
     :return:
     """
     print("Initiating ")
-    lambda_ = lambda_
-    n_factors = 20
-    n, m = A.shape
-    n_iterations = n_iterations
-    Users = 5 * np.random.rand(n, n_factors)
-    Items = 5 * np.random.rand(n_factors, m)
+    MAE = []
+    for i in range(1, n_factors):
+        lambda_ = lambda_
+        n_factors = i
+        n, m = A.shape
+        n_iterations = n_iterations
+        Users = 5 * np.random.rand(n, n_factors)
+        Items = 5 * np.random.rand(n_factors, m)
 
-    def get_error(A, Users, Items, R):
-        # This calculates the MSE of nonzero elements
-        return np.sum((R * (A - np.dot(Users, Items))) ** 2) / np.sum(R)
+        def get_error(A, Users, Items, R):
+            # This calculates the MSE of nonzero elements
+            return np.sum((R * (A - np.dot(Users, Items))) ** 2) / np.sum(R)
 
-    MSE_List = []
+        MSE_List = []
 
-    print("Starting Iterations")
-    for iter in range(n_iterations):
-        for i, Ri in enumerate(R):
-            Users[i] = np.linalg.solve(
-                np.dot(Items, np.dot(np.diag(Ri), Items.T))
-                + lambda_ * np.eye(n_factors),
-                np.dot(Items, np.dot(np.diag(Ri), A[i].T)),
-            ).T
-        print(
-            "Error after solving for User Matrix:",
-            get_error(A, Users, Items, R),
-        )
+        print("Starting Iterations")
+        for iter in range(n_iterations):
+            for i, Ri in enumerate(R):
+                Users[i] = np.linalg.solve(
+                    np.dot(Items, np.dot(np.diag(Ri), Items.T))
+                    + lambda_ * np.eye(n_factors),
+                    np.dot(Items, np.dot(np.diag(Ri), A[i].T)),
+                    ).T
+            print(
+                "Error after solving for User Matrix:",
+                get_error(A, Users, Items, R),
+                )
 
-        for j, Rj in enumerate(R.T):
-            Items[:, j] = np.linalg.solve(
-                np.dot(Users.T, np.dot(np.diag(Rj), Users))
-                + lambda_ * np.eye(n_factors),
-                np.dot(Users.T, np.dot(np.diag(Rj), A[:, j])),
-            )
-        print(
-            "Error after solving for Item Matrix:",
-            get_error(A, Users, Items, R),
-        )
+            for j, Rj in enumerate(R.T):
+                Items[:, j] = np.linalg.solve(
+                    np.dot(Users.T, np.dot(np.diag(Rj), Users))
+                    + lambda_ * np.eye(n_factors),
+                    np.dot(Users.T, np.dot(np.diag(Rj), A[:, j])),
+                    )
+            print(
+                "Error after solving for Item Matrix:",
+                 get_error(A, Users, Items, R),
+                )
 
-        MSE_List.append(get_error(A, Users, Items, R))
-        print("%sth iteration is complete..." % iter)
-    return Users, Items
-    # print(MSE_List)
+            MSE_List.append(get_error(A, Users, Items, R))
+            print("%sth iteration is complete..." % iter)
+        MAE.append(MSE_List)
+    return Users, Items, MAE
+    
     # fig = plt.figure()
     # ax = fig.add_subplot(111)
     # plt.plot(range(1, len(MSE_List) + 1), MSE_List); plt.ylabel('Error'); plt.xlabel('Iteration')
@@ -124,7 +130,18 @@ def runALS(A, R, n_factors, n_iterations, lambda_):
 
 
 # %%
-U, Vt = runALS(R_normalize, A, 10, 10, 0.1)
+U, Vt, MAE_list = runALS(R_normalize, A, 20, 20, 0.1)
+
+# %% [markdown]
+# Below finds the index of the minimum of the maximum error after each set of iterations. This is the optimal value for the parameter n_factors.
+
+# %%
+MAE_max = []
+#get a list of the max errors from each value of n_factor
+for i in MAE_list:
+    MAE_max.append(max(i))
+#The index of the minimum max error is the optimal n_factor value
+print(MAE_max.index(min(MAE_max)))
 
 # %%
 recommendations = np.dot(U, Vt)
@@ -132,9 +149,14 @@ recsys_df = pd.DataFrame(data = recommendations[0:, 0:], index = D_df.index,
                         columns = D_df.columns)
 recsys_df.head()
 
+# %% [markdown]
+# Plot the recommended depths for all formations for the first 5 wells vs the actual depths
+
 # %%
+#TODO Ask if this normalization is correct or not
+D_df_normalized = normalize((D_df.iloc[0:, 1].values).reshape(1, -1), norm='l2')
 for i in range(5):
-    plt.scatter(recsys_df.iloc[0:, i].values, D_df.iloc[0:, i].values) #plot predicted vs actual
+    plt.scatter(recsys_df.iloc[0:, i].values, D_df_normalized) #plot predicted vs actual
     plt.xlabel('predicted depth')
     plt.ylabel('actual depth')
     plt.plot(np.arange(0,recsys_df.iloc[0:,i].max()))
@@ -152,5 +174,11 @@ recsys_df.iloc[0:, 1]
 D_df.iloc[0:, 1]
 
 # %%
+plt.scatter(df_merged.Easting, df_merged.Northing, c = df_merged.iloc[0:, 6])
+plt.colorbar()
+plt.xlabel("Northing")
+plt.ylabel("Easting")
+
+
 
 # %%
