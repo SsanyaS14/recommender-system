@@ -19,7 +19,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 #### TODO install geopandas
 #import geopandas as gp
-from sklearn.preprocessing import normalize
+from sklearn.preprocessing import normalize, MinMaxScaler
 from scipy.sparse import coo_matrix, csr_matrix
 
 
@@ -31,24 +31,44 @@ df_form = pd.read_csv("formationout.csv")
 df_well = pd.read_csv("out.csv")
 #Merge the 2 CSVs by API number
 df_merged = df_well.merge(df_form, how = "left", on = "API Number")
+#drop well number identifier since we are using API number
+df_merged.drop(columns="Well Number", inplace = True)
 print(df_merged.head())
 
+# %% [markdown]
+# Taking a sample of the Dataframe to holdout 
+
+# %%
+df_holdout = df_merged.sample(frac=0.2, random_state=4242001)
+#make list of API numbers that we held out
+heldout_APIs = []
+for i in df_holdout["API Number"]:
+    heldout_APIs.append(i)
+#now we need to go back to our original Dataframe and set the vals we are holding out to 0
+print(df_holdout.head())
+df_merged_heldout = df_merged.copy()
+df_merged_heldout.iloc[2933, 6] = 0
+df_merged_heldout.iloc[2439, 6] = 0
+df_merged_heldout.iloc[3298, 6] = 0
+df_merged_heldout.iloc[542, 6] = 0
+df_merged_heldout.iloc[5466, 6] = 0
 
 
 # %% [markdown]
-# Make a sparse matrix from the Dataframe
+# Make a sparse matrix from the Dataframe heldout
 
 # %%
-D_df = df_merged.pivot_table("Top MD","Form Alias","API Number").fillna(0)
-df_merged[["Top MD", "Form Alias", "API Number"]]
+D_df = df_merged_heldout.pivot_table("Top MD","Form Alias","API Number").fillna(0)
 
 # %% [markdown]
 # Trying different ways of normalizing R, demeaning and normalizing with SKLearn
 
 # %%
+mms = MinMaxScaler()
 R = D_df.values
+target_vals = df_holdout["Top MD"]
 well_depth_mean = np.mean(R, axis = 1)
-R_normalize = normalize(R, norm = "l2")
+R_normalize = mms.fit_transform(R, target_vals)
 R_demeaned = R - well_depth_mean.reshape(-1, 1)
 
 # %% [markdown]
@@ -153,13 +173,29 @@ recsys_df.head()
 # Plot the recommended depths for all formations for the first 5 wells vs the actual depths
 
 # %%
-#TODO Ask if this normalization is correct or not
-D_df_normalized = normalize((D_df.iloc[0:, 1].values).reshape(1, -1), norm='l2')
+D_df_normalized = mms.fit_transform(D_df.iloc[0:, 1].values.reshape(-1,1))
 for i in range(5):
     plt.scatter(recsys_df.iloc[0:, i].values, D_df_normalized) #plot predicted vs actual
     plt.xlabel('predicted depth')
     plt.ylabel('actual depth')
     plt.plot(np.arange(0,recsys_df.iloc[0:,i].max()))
+
+# %% [markdown]
+# Tough part, check predictions against known and use MAE error metric
+
+# %%
+recsys_df.T
+recsys_df_toJoin = recsys_df.T.reset_index()
+
+# %%
+from sklearn.metrics import median_absolute_error
+known_vals = df_holdout["Top MD"]
+print(df_holdout.head())
+for i in range(0, df_merged.iloc(0:, 5).max()):
+    #loop through all form aliases
+    
+predicted_vals = np.array(prediction_list)
+median_absolute_error(known_vals, predicted_vals)
 
 # %% [markdown]
 # Predicted depths
