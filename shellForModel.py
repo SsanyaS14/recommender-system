@@ -100,7 +100,7 @@ def runALS(A, R, n_factors, n_iterations, lambda_):
     MAE = []
     for i in range(1, n_factors):
         lambda_ = lambda_
-        n_factors = i
+        n_factors = n_factors
         n, m = A.shape
         n_iterations = n_iterations
         Users = 5 * np.random.rand(n, n_factors)
@@ -184,18 +184,28 @@ for i in range(5):
 # Tough part, check predictions against known and use MAE error metric
 
 # %%
-recsys_df.T
+#print(recsys_df)
 recsys_df_toJoin = recsys_df.T.reset_index()
+print(recsys_df_toJoin)
 
 # %%
 from sklearn.metrics import median_absolute_error
-known_vals = df_holdout["Top MD"]
-print(df_holdout.head())
-for i in range(0, df_merged.iloc(0:, 5).max()):
-    #loop through all form aliases
-    
-predicted_vals = np.array(prediction_list)
-median_absolute_error(known_vals, predicted_vals)
+MAE = []
+for i in range(0, int( df_merged.iloc[0:, 5].max() + 1 )):
+    act_list = []
+    pred_list = []
+    #loop through all formation aliases
+    #get actual df form alias i
+    actual = df_merged[df_merged["Form Alias"] == float(i)]
+    #get predicted df form alias i
+    predicted = pd.DataFrame(recsys_df_toJoin[float(i)])
+    #add API Number column to new dataframe
+    predicted = predicted.assign(API=recsys_df_toJoin["API Number"])
+    #query by API Number now
+    actual = actual[actual["API Number"].isin(heldout_APIs)]
+    predicted = predicted[predicted["API"].isin(heldout_APIs)]
+    MAE.append( median_absolute_error( actual, mms.inverse_transform(predicted) ) )
+
 
 # %% [markdown]
 # Predicted depths
