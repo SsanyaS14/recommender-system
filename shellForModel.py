@@ -40,10 +40,12 @@ print(df_merged.head())
 
 # %%
 df_holdout = df_merged.sample(frac=0.2, random_state=4242001)
+print(df_holdout.head())
 #make list of API numbers that we held out
 heldout_APIs = []
 for i in df_holdout["API Number"]:
     heldout_APIs.append(i)
+print(len(heldout_APIs))
 #now we need to go back to our original Dataframe and set the vals we are holding out to 0
 df_merged_heldout = df_merged.copy()
 np.random.seed(4242001)
@@ -58,6 +60,10 @@ df_merged_heldout[df_merged_heldout["API Number"].isin(heldout_APIs)]["Form Alia
 #set random form alias h to NaN
 #ser.replace(h, float("NaN"))
 
+
+# %%
+len(df_holdout["API Number"].unique())
+df_holdout.sort_values(by=["API Number", "Form Alias"])
 
 # %% [markdown]
 # Make a sparse matrix from the Dataframe heldout
@@ -171,6 +177,11 @@ recsys_df = pd.DataFrame(data = recommendations[0:, 0:], index = D_df.index,
                         columns = D_df.columns)
 recsys_df.head()
 
+# %%
+stacked = recsys_df.T.reset_index().stack(level=0)
+stacked.index
+#look at dropping multi level index
+
 # %% [markdown]
 # Plot the recommended depths for all formations for the first 5 wells vs the actual depths
 
@@ -181,6 +192,8 @@ for i in range(5):
     plt.xlabel('predicted depth')
     plt.ylabel('actual depth')
     plt.plot(np.arange(0,recsys_df.iloc[0:,i].max()))
+    #denormalized and printed error for manuscript
+    print(median_absolute_error(mms.inverse_transform(recsys_df.iloc[0:, i].values.reshape(-1,1)), D_df.iloc[0:, 1].values))
 
 # %% [markdown]
 # Tough part, check predictions against known and use MAE error metric
