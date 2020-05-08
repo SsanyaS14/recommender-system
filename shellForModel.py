@@ -17,14 +17,12 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-#### TODO install geopandas
-#import geopandas as gp
 from sklearn.preprocessing import normalize, MinMaxScaler
 from scipy.sparse import coo_matrix, csr_matrix
 
 
 # %% [markdown]
-# Read in standardized csv files and merge them into one Dataframe
+# Read in standardized csv files and merge them into one Dataframe with relevant information
 
 # %%
 df_form = pd.read_csv("formationout.csv")
@@ -33,43 +31,43 @@ df_well = pd.read_csv("out.csv")
 df_merged = df_well.merge(df_form, how = "left", on = "API Number")
 #drop well number identifier since we are using API number
 df_merged.drop(columns="Well Number", inplace = True)
-print(df_merged.head())
+
+# %% [markdown]
+# Standardize depth around the minimum value
+
+# %%
+df_merged["Top MD"] = df_merged["Top MD"] - df_merged["Top MD"].min()
 
 # %% [markdown]
 # Taking a sample of the Dataframe to holdout 
 
 # %%
 df_holdout = df_merged.sample(frac=0.2, random_state=4242001)
-print(df_holdout.head())
 #make list of API numbers that we held out
 heldout_APIs = []
 for i in df_holdout["API Number"]:
     heldout_APIs.append(i)
-print(len(heldout_APIs))
 #now we need to go back to our original Dataframe and set the vals we are holding out to 0
 df_merged_heldout = df_merged.copy()
 np.random.seed(4242001)
-#the random form aliases we are holding out
+#get 5 random formation aliases to hold out
 h = np.random.randint(0, 59, 5)
-#
-#hold out these tops, but keep rest of data intact
-#
-#query by heldout APIs and find subset dataframe
+#hold out these tops by setting them to NaN, but keep the rest of the data intact
 df_merged_heldout[df_merged_heldout["API Number"].isin(heldout_APIs)]["Form Alias"].replace(h, float("NaN"), inplace=True)
-#ser = subset["Form Alias"]
-#set random form alias h to NaN
-#ser.replace(h, float("NaN"))
 
-
-# %%
-len(df_holdout["API Number"].unique())
-df_holdout.sort_values(by=["API Number", "Form Alias"])
 
 # %% [markdown]
-# Make a sparse matrix from the Dataframe heldout
+# Sort the held out values by API Number and Formation Alias
+
+# %%
+df_holdout.sort_values(by=["API Number", "Form Alias"], inplace=True)
+
+# %% [markdown]
+# Make a sparse matrix from the Dataframe with random formation aliases held out
 
 # %%
 D_df = df_merged_heldout.pivot_table("Top MD","Form Alias","API Number").fillna(0)
+D_df
 
 # %% [markdown]
 # Trying different ways of normalizing R, demeaning and normalizing with SKLearn
@@ -78,9 +76,7 @@ D_df = df_merged_heldout.pivot_table("Top MD","Form Alias","API Number").fillna(
 mms = MinMaxScaler()
 R = D_df.values
 target_vals = df_holdout["Top MD"]
-well_depth_mean = np.mean(R, axis = 1)
 R_normalize = mms.fit_transform(R, target_vals)
-R_demeaned = R - well_depth_mean.reshape(-1, 1)
 
 # %% [markdown]
 # Create binarized matrix with values of 1 where there are depth values in the sparse matrix R and values of 0 where there are not depth values in the sparse matrix R.
@@ -147,7 +143,7 @@ def runALS(A, R, n_factors, n_iterations, lambda_):
 
         MSE_List.append(get_error(A, Users, Items, R))
         print("%sth iteration is complete..." % iter)
-    return Users, Items, MAE
+    return Users, Items
     
     # fig = plt.figure()
     # ax = fig.add_subplot(111)
@@ -157,19 +153,14 @@ def runALS(A, R, n_factors, n_iterations, lambda_):
     # plt.show()
 
 
+# %% [markdown]
+# Get the User and Item vectors from ALS
+
 # %%
-U, Vt, MAE_list = runALS(R_normalize, A, 20, 20, 0.1)
+U, Vt = runALS(R, A, 20, 20, 0.1)
 
 # %% [markdown]
-# Below finds the index of the minimum of the maximum error after each set of iterations. This is the optimal value for the parameter n_factors.
-
-# %%
-#MAE_max = []
-#get a list of the max errors from each value of n_factor
-#for i in MAE_list:
-    #MAE_max.append(max(i))
-#The index of the minimum max error is the optimal n_factor value
-#print(MAE_max.index(min(MAE_max)))
+# Construct our predicted Dataframe from our User and Item vectors
 
 # %%
 recommendations = np.dot(U, Vt)
@@ -177,77 +168,42 @@ recsys_df = pd.DataFrame(data = recommendations[0:, 0:], index = D_df.index,
                         columns = D_df.columns)
 recsys_df.head()
 
+# %% [markdown]
+# Reshape the predicted Dataframe to a more easily accessible format
+
 # %%
-stacked = recsys_df.T.reset_index().stack(level=0)
-stacked.index
-#look at dropping multi level index
+recsys_df_reshaped = recsys_df.T.reset_index()
+
+# %% [markdown]
+# Reshape our predictions and merge them into one final Dataframe showcasing the relevant information 
+
+# %%
+#reshape predictions
+flat_preds = recsys_df.unstack().reset_index()
+#merge predictions with our testing data set
+merged_df = pd.merge(df_holdout, flat_preds,  how='left', left_on=['API Number','Form Alias'], right_on = ['API Number','Form Alias'])
+merged_df.rename(columns={0:"Predicted Depth"}, inplace=True)
+#Drop irrelevant columns to more clearly showcase results
+final_df = merged_df.drop(columns={"Northing", "Easting", "Normalized TVD", "True Vertical Depth"})
+#add signed error colum to indicate whether we are over or under predicting
+final_df["signed_error"] = final_df["Top MD"] - final_df["Predicted Depth"]
+final_df.dropna().head()
+
+# %% [markdown]
+# Now from our final Dataframe we can find an error metric to evaluate the performance of our model.
+
+# %%
+from sklearn.metrics import mean_absolute_error as MAE
+MAE(final_df["Top MD"].dropna().values, final_df["Predicted Depth"].dropna().values)
 
 # %% [markdown]
 # Plot the recommended depths for all formations for the first 5 wells vs the actual depths
 
 # %%
-D_df_normalized = mms.fit_transform(D_df.iloc[0:, 1].values.reshape(-1,1))
 for i in range(5):
-    plt.scatter(recsys_df.iloc[0:, i].values, D_df_normalized) #plot predicted vs actual
+    plt.scatter(recsys_df.iloc[0:, i].values, D_df.iloc[0:, i].values) #plot predicted vs actual
     plt.xlabel('predicted depth')
     plt.ylabel('actual depth')
     plt.plot(np.arange(0,recsys_df.iloc[0:,i].max()))
-    #denormalized and printed error for manuscript
-    print(median_absolute_error(mms.inverse_transform(recsys_df.iloc[0:, i].values.reshape(-1,1)), D_df.iloc[0:, 1].values))
-
-# %% [markdown]
-# Tough part, check predictions against known and use MAE error metric
-
-# %%
-#print(recsys_df)
-recsys_df_toJoin = recsys_df.T.reset_index()
-print(recsys_df_toJoin)
-
-# %%
-actual = df_merged[(df_merged["API Number"].isin(heldout_APIs)) & (df_merged["Form Alias"] == 0.0)]
-predicted = recsys_df_toJoin[(recsys_df_toJoin["API Number"].isin(heldout_APIs))][0.0]
-actual
-
-# %%
-from sklearn.metrics import median_absolute_error
-MAE = []
-for i in range(0, int( df_merged.iloc[0:, 5].max() + 1 )):
-    act_list = []
-    pred_list = []
-    #loop through all formation aliases
-    #get actual df form alias i
-    actual = df_merged[df_merged["Form Alias"] == float(i)]
-    #get predicted df form alias i
-    predicted = pd.DataFrame(recsys_df_toJoin[float(i)])
-    #add API Number column to new dataframe
-    #predicted = predicted.assign(API=recsys_df_toJoin["API Number"])
-    #query by API Number now
-    #actual = actual[actual["API Number"].isin(heldout_APIs)]
-    #predicted = predicted[predicted["API"].isin(heldout_APIs)]
-    #MAE.append( median_absolute_error( actual["Top MD"], mms.inverse_transform(predicted[float(i)].values.reshape(1, -1)) ) )
-
-
-# %%
-recsys_df_toJoin.head()
-
-# %% [markdown]
-# Predicted depths
-
-# %%
-recsys_df.iloc[0:, 1]
-
-# %% [markdown]
-# Actual depths
-
-# %%
-D_df.iloc[0:, 1]
-
-# %%
-plt.scatter(df_merged.Easting, df_merged.Northing, c = df_merged.iloc[0:, 6])
-plt.colorbar()
-plt.xlabel("Northing")
-plt.ylabel("Easting")
-
-
 
 # %%
